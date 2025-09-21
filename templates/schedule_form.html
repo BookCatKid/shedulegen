@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Schedule Generator</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"] { width: 90%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .class-inputs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .class-inputs .form-group { margin-bottom: 0; }
+        #import-area { display: none;}
+        #import-area textarea { width: 100%; height: 150px; }
+        #import-area button { margin-top: 5px; background: #28a745; }
+        .also-note { font-style: italic; font-size: 0.85em; color: #555; margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <h1>Schedule Generator</h1>
+    Welcome to the Schedule Generator! This tool helps you create a beautiful, customized school schedule. For information on how to use this tool, please see <a href="{{ url_for('guide') }}">the guide</a>.
+    <br><br>
+    <form method="POST" action="/generate" id="schedule-form">
+        <div class="form-group">
+            <label for="title">Schedule Title:</label>
+            <input type="text" id="title" name="title" value="{{ title }}" placeholder="Enter schedule title">
+        </div>
+
+        <div class="form-group">
+            <label for="free-period-name">Free Period Name (for X-Day):</label>
+            <input type="text" id="free-period-name" name="free_period_name" value="Study Period" placeholder="Study Period">
+            <div class="also-note">This replaces any class containing 'Foundations' in the X-Day column. Leave blank to keep 'Foundations' as-is.</div>
+        </div>
+
+        <div class="form-group">
+            <label>Classes:</label>
+            <button type="button" id="import-btn" style="margin-bottom:10px;">Import Classes</button>
+            <button type="button" id="import-google-btn" style="margin-bottom:10px; margin-left:10px;">Import from Google Calendar</button>
+            <button type="button" id="clear-btn" style="margin-bottom:10px; margin-left:10px; background: #dc3545;">Clear All</button>
+            <button type="button" id="import-email-btn" style="margin-bottom:10px; margin-left:10px; display: none;">Import by Email (Deprecated)</button>
+
+            <div id="import-google-status" style="display:none; margin-bottom:10px;">
+                <div id="import-google-success" style="color:green; margin-top:5px; display:none;">
+                    Successfully imported schedule from Google Calendar!
+                </div>
+                <div id="import-google-error" style="color:red; margin-top:5px; display:none;">
+                    Error importing from Google Calendar. Please try again.
+                </div>
+            </div>
+
+            <div id="import-email-area" style="display:none; margin-bottom:10px;">
+                <label for="import-email-input">Enter your school email:</label>
+                <input type="email" id="import-email-input" placeholder="your.email@ljcds.org" style="width:90%; padding:8px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">
+                <button type="button" id="import-email-apply-btn" style="margin-top: 5px; background: #28a745;">Import</button>
+                <button type="button" id="import-email-cancel-btn" style="margin-top: 5px; background: #28a745;">Cancel</button>
+                <div id="import-email-error" style="color:red; margin-top:5px;"></div>
+                <div class="also-note" style="margin-top:4px;">
+                    <b>Import by Email (Deprecated):</b> This method uses cached calendar data and may not be up-to-date. Please use "Import from Google Calendar" instead for the most current data.
+                </div>
+            </div>
+
+            <div id="import-area">
+                <label for="import-text">Paste JSON here:</label>
+                <textarea id="import-text" placeholder=''></textarea>
+                <button type="button" id="import-apply-btn">Apply</button>
+                <button type="button" id="import-cancel-btn">Cancel</button>
+                <div id="import-error" style="color:red; margin-top:5px;"></div>
+            </div>
+
+            <div class="class-inputs">
+                {% for i in range(1,9) %}
+                <div class="form-group">
+                    <label for="class-{{ i }}">Period {{ i }}:</label>
+                    <input type="text" id="class-{{ i }}" name="class-{{ i }}" value="{{ classes.get(i|string, '') }}" placeholder="Class for period {{ i }}">
+                    <input type="text" id="room-{{ i }}" name="room-{{ i }}" value="{{ rooms.get(i|string, '') }}" placeholder="Room for period {{ i }}" style="margin-top:5px; width:90%; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                    <input type="text" id="teacher-{{ i }}" name="teacher-{{ i }}" value="{{ teachers.get(i|string, '') }}" placeholder="Teacher for period {{ i }}" style="margin-top:5px; width:90%; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <button type="submit">Generate Schedule</button>
+    </form>
+
+<script>
+document.getElementById('import-btn').addEventListener('click', () => {
+    // Close email area if open
+    document.getElementById('import-email-area').style.display = 'none';
+    document.getElementById('import-email-input').value = '';
+    document.getElementById('import-email-error').textContent = '';
+    
+    // Toggle import area
+    const importArea = document.getElementById('import-area');
+    if (importArea.style.display === 'block') {
+        importArea.style.display = 'none';
+        document.getElementById('import-text').value = '';
+        document.getElementById('import-error').textContent = '';
+    } else {
+        importArea.style.display = 'block';
+        document.getElementById('import-error').textContent = '';
+    }
+});
+
+document.getElementById('import-cancel-btn').addEventListener('click', () => {
+    document.getElementById('import-area').style.display = 'none';
+    document.getElementById('import-text').value = '';
+    document.getElementById('import-error').textContent = '';
+});
+
+document.getElementById('import-email-btn').addEventListener('click', () => {
+    // Close import area if open
+    document.getElementById('import-area').style.display = 'none';
+    document.getElementById('import-text').value = '';
+    document.getElementById('import-error').textContent = '';
+    
+    // Toggle email area
+    const emailArea = document.getElementById('import-email-area');
+    if (emailArea.style.display === 'block') {
+        emailArea.style.display = 'none';
+        document.getElementById('import-email-input').value = '';
+        document.getElementById('import-email-error').textContent = '';
+    } else {
+        emailArea.style.display = 'block';
+        document.getElementById('import-email-error').textContent = '';
+    }
+});
+
+document.getElementById('import-email-cancel-btn').addEventListener('click', () => {
+    document.getElementById('import-email-area').style.display = 'none';
+    document.getElementById('import-email-input').value = '';
+    document.getElementById('import-email-error').textContent = '';
+});
+
+document.getElementById('import-email-apply-btn').addEventListener('click', async () => {
+    let email = document.getElementById('import-email-input').value.trim();
+    if (!email) {
+        document.getElementById('import-email-error').textContent = 'Please enter your school email.';
+        return;
+    }
+
+    document.getElementById('import-email-error').textContent = 'Loading...';
+    
+    try {
+        const response = await fetch('/api/import_by_email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ email: email })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            document.getElementById('import-email-error').textContent = data.error || 'Error fetching schedule';
+            return;
+        }
+
+        // Apply the formatted schedule to the form fields
+        const schedule = data.schedule;
+        for (let i = 1; i <= 8; i++) {
+            let input = document.getElementById('class-' + i);
+            let roomInput = document.getElementById('room-' + i);
+            let teacherInput = document.getElementById('teacher-' + i);
+            let formGroup = input.parentElement;
+
+            // Clear old "also" notes
+            let oldNote = formGroup.querySelector(".also-note");
+            if (oldNote) oldNote.remove();
+
+            let periodData = schedule[i] || schedule[i.toString()];
+            if (periodData && Array.isArray(periodData.name)) {
+                let nameList = periodData.name;
+                let roomList = periodData.room || [];
+
+                if (nameList.length > 0) {
+                    let foundationsIndex = nameList.findIndex(v => v.includes("Foundations"));
+                    let mainValue = foundationsIndex !== -1 ? nameList[foundationsIndex] : nameList[0];
+                    let mainValueIndex = foundationsIndex !== -1 ? foundationsIndex : 0;
+                    let alsoValues = nameList.filter((_, idx) => idx !== mainValueIndex);
+
+                    input.value = mainValue || "";
+                    roomInput.value = roomList[mainValueIndex] || "";
+                    teacherInput.value = ""; // No teacher data from format_schedule
+
+                    // Create the also note if there are other classes
+                    if (alsoValues.length > 0) {
+                        let note = document.createElement("div");
+                        note.className = "also-note";
+                        note.textContent = "also classes: " + alsoValues.join(", ");
+                        formGroup.appendChild(note);
+                    }
+                } else {
+                    input.value = "";
+                    roomInput.value = "";
+                    teacherInput.value = "";
+                }
+            } else {
+                input.value = "";
+                roomInput.value = "";
+                teacherInput.value = "";
+            }
+        }
+
+        document.getElementById('import-email-area').style.display = 'none';
+        document.getElementById('import-email-input').value = '';
+        document.getElementById('import-email-error').textContent = '';
+
+        if (data.unrecognized && data.unrecognized.length > 0) {
+            console.log('Unrecognized events:', data.unrecognized);
+        }
+
+    } catch (error) {
+        document.getElementById('import-email-error').textContent = 'Error: ' + error.message;
+    }
+    updatePermalink();
+});
+
+document.getElementById('import-apply-btn').addEventListener('click', () => {
+    let text = document.getElementById('import-text').value.trim();
+    if (!text) {
+        document.getElementById('import-error').textContent = 'Please paste JSON text.';
+        return;
+    }
+
+    try {
+        let data = JSON.parse(text);
+        document.getElementById('import-error').textContent = '';
+
+        for (let i = 1; i <= 8; i++) {
+            let input = document.getElementById('class-' + i);
+            let roomInput = document.getElementById('room-' + i);
+            let teacherInput = document.getElementById('teacher-' + i);
+            let formGroup = input.parentElement;
+
+            // Clear old "also" notes
+            let oldNote = formGroup.querySelector(".also-note");
+            if (oldNote) oldNote.remove();
+
+            let periodData = data[i] || data[i.toString()];
+            if (periodData && Array.isArray(periodData.name)) {
+                let nameList = periodData.name;
+
+                if (nameList.length > 0) {
+                    let foundationsIndex = nameList.findIndex(v => v.includes("Foundations"));
+                    let mainValue = foundationsIndex !== -1 ? nameList[foundationsIndex] : nameList[0];
+                    let mainValueIndex = foundationsIndex !== -1 ? foundationsIndex : 0;
+                    let alsoValues = nameList.filter((_, idx) => idx !== mainValueIndex);
+
+                    input.value = mainValue || "";
+
+                    // Handle rooms - use the same index logic as classes
+                    let mainRoomIndex = mainValueIndex;
+                    if (periodData.room && Array.isArray(periodData.room) && periodData.room.length > 0) {
+                        // Use the room that corresponds to the main class
+                        if (mainRoomIndex < periodData.room.length) {
+                            roomInput.value = periodData.room[mainRoomIndex] || "";
+                        } else {
+                            roomInput.value = periodData.room[0] || "";
+                        }
+                    } else {
+                        roomInput.value = "";
+                    }
+
+                    // Handle teachers - use the same index logic as classes
+                    let mainTeacherIndex = mainValueIndex;
+                    if (periodData.teacher && Array.isArray(periodData.teacher) && periodData.teacher.length > 0) {
+                        // Use the teacher that corresponds to the main class
+                        if (mainTeacherIndex < periodData.teacher.length) {
+                            teacherInput.value = periodData.teacher[mainTeacherIndex] || "";
+                        } else {
+                            teacherInput.value = periodData.teacher[0] || "";
+                        }
+                    } else {
+                        teacherInput.value = "";
+                    }
+
+                    // Collect all "also" items
+                    let alsoItems = [];
+
+                    // Add class names (only if there are other classes besides the main one)
+                    if (alsoValues.length > 0) {
+                        alsoItems.push("classes: " + alsoValues.join(", "));
+                    }
+
+                    // Add class numbers if available
+                    if (periodData.number && Array.isArray(periodData.number) && periodData.number.length > 0) {
+                        alsoItems.push("numbers: " + periodData.number.join(", "));
+                    }
+
+                    // Add other rooms if there are multiple rooms
+                    if (periodData.room && Array.isArray(periodData.room) && periodData.room.length > 1) {
+                        let otherRooms = periodData.room.filter((room, idx) => idx !== mainRoomIndex && room.trim() !== "");
+                        if (otherRooms.length > 0) {
+                            alsoItems.push("rooms: " + otherRooms.join(", "));
+                        }
+                    }
+
+                    // Add other teachers if there are multiple teachers
+                    if (periodData.teacher && Array.isArray(periodData.teacher) && periodData.teacher.length > 1) {
+                        let otherTeachers = periodData.teacher.filter((teacher, idx) => idx !== mainTeacherIndex && teacher.trim() !== "");
+                        if (otherTeachers.length > 0) {
+                            alsoItems.push("teachers: " + otherTeachers.join(", "));
+                        }
+                    }
+
+                    // Create the also note if there are any items
+                    if (alsoItems.length > 0) {
+                        let note = document.createElement("div");
+                        note.className = "also-note";
+                        note.textContent = "also " + alsoItems.join("; ");
+                        formGroup.appendChild(note);
+                    }
+                } else {
+                    input.value = "";
+                    roomInput.value = "";
+                    teacherInput.value = "";
+                }
+            } else {
+                input.value = "";
+                roomInput.value = "";
+                teacherInput.value = "";
+            }
+        }
+
+        document.getElementById('import-area').style.display = 'none';
+        document.getElementById('import-text').value = '';
+
+    } catch (e) {
+        document.getElementById('import-error').textContent = 'Invalid JSON: ' + e.message;
+    }
+    updatePermalink();
+});
+
+document.getElementById('schedule-form').addEventListener('submit', (e) => {
+    let existing = document.getElementById('classes-json');
+    if (existing) existing.remove();
+
+    let classesObj = {};
+    for (let i = 1; i <= 8; i++) {
+        let classVal = document.getElementById('class-' + i).value.trim();
+        let roomVal = document.getElementById('room-' + i).value.trim();
+        let teacherVal = document.getElementById('teacher-' + i).value.trim();
+
+        classesObj[i] = {
+            name: classVal || "",
+            room: roomVal || "",
+            teacher: teacherVal || ""
+        };
+    }
+
+    let hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'classes';
+    hidden.id = 'classes-json';
+    hidden.value = JSON.stringify(classesObj);
+
+    e.target.appendChild(hidden);
+});
+
+// --- Permalink logic start ---
+function base64UrlEncode(str) {
+    return btoa(unescape(encodeURIComponent(str)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+function base64UrlDecode(str) {
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (str.length % 4) str += '=';
+    return decodeURIComponent(escape(atob(str)));
+}
+function getClassesObjFromForm() {
+    let classesObj = {};
+    for (let i = 1; i <= 8; i++) {
+        let classVal = document.getElementById('class-' + i).value.trim();
+        let roomVal = document.getElementById('room-' + i).value.trim();
+        let teacherVal = document.getElementById('teacher-' + i).value.trim();
+        classesObj[i] = {
+            name: classVal || "",
+            room: roomVal || "",
+            teacher: teacherVal || ""
+        };
+    }
+    return classesObj;
+}
+function updatePermalink() {
+    const classesObj = getClassesObjFromForm();
+    const encoded = base64UrlEncode(JSON.stringify(classesObj));
+    localStorage.setItem('schedule_data', encoded);
+    const url = new URL(window.location);
+    url.searchParams.set('data', encoded);
+    window.history.replaceState({}, '', url);
+}
+function loadScheduleFromPermalink() {
+    const url = new URL(window.location);
+    let data = url.searchParams.get('data');
+    // If no data param, but localStorage has a value, set the param and reload
+    if (!data) {
+        const saved = localStorage.getItem('schedule_data');
+        if (saved) {
+            url.searchParams.set('data', saved);
+            window.location.replace(url);
+            return;
+        }
+    }
+    if (!data) return;
+    try {
+        const decoded = base64UrlDecode(data);
+        const obj = JSON.parse(decoded);
+        for (let i = 1; i <= 8; i++) {
+            let period = obj[i] || obj[i.toString()] || {};
+            document.getElementById('class-' + i).value = period.name || '';
+            document.getElementById('room-' + i).value = period.room || '';
+            document.getElementById('teacher-' + i).value = period.teacher || '';
+        }
+    } catch (e) {
+        // ignore errors
+    }
+}
+// Update permalink and localStorage on any input change
+for (let i = 1; i <= 8; i++) {
+    document.getElementById('class-' + i).addEventListener('input', updatePermalink);
+    document.getElementById('room-' + i).addEventListener('input', updatePermalink);
+    document.getElementById('teacher-' + i).addEventListener('input', updatePermalink);
+}
+// Also update after import (by email or JSON)
+function patchImportApply(fn) {
+    return function(...args) {
+        fn.apply(this, args);
+        setTimeout(updatePermalink, 0);
+    };
+}
+document.getElementById('import-apply-btn').onclick = patchImportApply(document.getElementById('import-apply-btn').onclick || (()=>{}));
+document.getElementById('import-email-apply-btn').onclick = patchImportApply(document.getElementById('import-email-apply-btn').onclick || (()=>{}));
+
+// Google Calendar import functionality
+document.getElementById('import-google-btn').onclick = function() {
+    window.location.href = '/login/google';
+};
+
+// Clear all functionality
+document.getElementById('clear-btn').onclick = function() {
+    if (confirm('Are you sure you want to clear all class information?')) {
+        for (let i = 1; i <= 8; i++) {
+            document.getElementById('class-' + i).value = '';
+            document.getElementById('room-' + i).value = '';
+            document.getElementById('teacher-' + i).value = '';
+        }
+        // Clear the title and free period name
+        document.getElementById('title').value = '{{ title }}';
+        document.getElementById('free-period-name').value = 'Study Period';
+        
+        // Clear localStorage
+        localStorage.removeItem('schedule_data');
+        
+        // Clear URL parameters and redirect to clean URL
+        const url = new URL(window.location);
+        url.searchParams.delete('data');
+        window.history.replaceState({}, '', url);
+    }
+};
+
+// Handle Google Calendar import callback
+function handleGoogleCalendarImport() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('imported') === 'google') {
+        // Show the status area
+        document.getElementById('import-google-status').style.display = 'block';
+        
+        // Remove the parameter from URL
+        const url = new URL(window.location);
+        url.searchParams.delete('imported');
+        window.history.replaceState({}, '', url);
+        
+        // Fetch the imported schedule data
+        fetch('/api/import_google_calendar')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('import-google-error').style.display = 'block';
+                    document.getElementById('import-google-success').style.display = 'none';
+                    return;
+                }
+                
+                // Apply the imported schedule data to the form
+                const schedule = data.schedule;
+                for (let i = 1; i <= 8; i++) {
+                    let period = schedule[i] || schedule[i.toString()] || {};
+                    document.getElementById('class-' + i).value = period.name || '';
+                    document.getElementById('room-' + i).value = period.room || '';
+                    document.getElementById('teacher-' + i).value = period.teacher || '';
+                }
+                
+                // Update permalink
+                updatePermalink();
+                
+                // Show success message
+                document.getElementById('import-google-success').style.display = 'block';
+                document.getElementById('import-google-error').style.display = 'none';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('import-google-error').style.display = 'block';
+                document.getElementById('import-google-success').style.display = 'none';
+            });
+    }
+}
+
+// On page load, load from permalink if present, or from localStorage if not
+window.addEventListener('DOMContentLoaded', function() {
+    loadScheduleFromPermalink();
+    handleGoogleCalendarImport();
+});
+// --- Permalink logic end ---
+</script>
+
+</body>
+</html>

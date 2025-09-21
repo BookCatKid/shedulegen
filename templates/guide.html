@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Schedule Generator Guide</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='github-markdown-light.css') }}">
+  <style>
+  body {
+    display: flex;
+    justify-content: center;
+    padding: 2rem;
+    background: #f6f8fa;
+  }
+  .markdown-body {
+    max-width: 1000px;
+    width: 100%;
+    padding: 2rem;
+    background: white;
+    border-radius: 8px;
+  }
+</style>
+
+</head>
+<body>
+  <article class="markdown-body">
+    <a href="{{ url_for('index') }}">
+      ← Return to Main Page
+    </a>
+    {{ content|safe }}
+  </article>
+</body>
+</html>
