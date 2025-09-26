@@ -11,6 +11,7 @@ import markdown
 from flask import Flask, Response, render_template, request, redirect, url_for
 from daschedule import normalize_classes, create_svg, CLASSES, TITLE_TEXT, ROOMS, TEACHERS
 from format_schedule import format_schedule_for_events
+from class_to_teacher_lookup import get_teacher
 import os
 from flask import session
 from google_auth_oauthlib.flow import Flow
@@ -144,7 +145,7 @@ def login_google():
     )
     authorization_url, state = flow.authorization_url(
         access_type="online",
-        include_granted_scopes="true",
+        include_granted_scopes="false",
         prompt="consent"
     )
     session["oauth_state"] = state
@@ -175,6 +176,7 @@ def import_google_calendar():
     creds_data = session.get("google_credentials")
     if not creds_data:
         return {"error": "Not authenticated with Google."}, 401
+
     creds = Credentials(
         token=creds_data["token"],
         token_uri=creds_data["token_uri"],
@@ -182,28 +184,53 @@ def import_google_calendar():
         client_secret=creds_data["client_secret"],
         scopes=creds_data["scopes"]
     )
+
     try:
         service = build("calendar", "v3", credentials=creds)
-        # Fetch events for the next Monday (similar to from_json.py logic)
+
         import datetime
-        DESIRED_WEEKDAY = 0  # Monday
-        today = datetime.datetime.now(datetime.timezone.utc)
-        days_ahead = (DESIRED_WEEKDAY - today.weekday() + 7) % 7
-        next_monday = today + datetime.timedelta(days=days_ahead)
-        next_monday_start = next_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        next_monday_end = next_monday_start + datetime.timedelta(days=1)
+        # Explicitly set the desired date
+        desired_date = datetime.datetime(2025, 9, 22, tzinfo=datetime.timezone.utc)
+
+        # Start of the day (midnight)
+        start_of_day = desired_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        # End of the day (next midnight)
+        end_of_day = start_of_day + datetime.timedelta(days=1)
+
         events_result = service.events().list(
-            calendarId='primary',
-            timeMin=next_monday_start.isoformat(),
-            timeMax=next_monday_end.isoformat(),
+            calendarId="primary",
+            timeMin=start_of_day.isoformat(),
+            timeMax=end_of_day.isoformat(),
             singleEvents=True,
             orderBy="startTime",
             maxResults=2500
         ).execute()
+
         events = events_result.get("items", [])
-        # Format events for the schedule generator
         formatted, unrecognized = format_schedule_for_events(events)
         return {"schedule": formatted, "unrecognized": unrecognized}
+
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+@app.route("/api/teacher/<path:class_name>", methods=["GET"])
+def get_teacher_for_class(class_name):
+    """
+    Get teacher name for a specific class.
+
+    Args:
+        class_name: The name of the class (URL encoded)
+
+    Returns:
+        JSON with teacher name or error
+    """
+    try:
+        teacher = get_teacher(class_name)
+        if teacher:
+            return {"teacher": teacher}
+        else:
+            return {"error": "Class not found"}, 404
     except Exception as e:
         return {"error": str(e)}, 500
 
